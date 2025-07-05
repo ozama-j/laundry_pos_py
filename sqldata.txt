@@ -1,0 +1,65 @@
+-- Drop existing tables if they exist
+DROP TABLE IF EXISTS order_item, "order", item, item_category, customer, "user" CASCADE;
+
+-- Users table
+CREATE TABLE "user" (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(80) UNIQUE NOT NULL,
+    password VARCHAR(200) NOT NULL,
+    role VARCHAR(20) NOT NULL
+);
+
+-- Customers table
+CREATE TABLE customer (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    mobile VARCHAR(15) UNIQUE NOT NULL
+);
+
+-- Item Categories table
+CREATE TABLE item_category (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+
+-- Items table
+CREATE TABLE item (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    category_id INTEGER REFERENCES item_category(id),
+    price FLOAT NOT NULL,
+    is_weight_based BOOLEAN DEFAULT FALSE
+);
+
+-- Orders table
+CREATE TABLE "order" (
+    id SERIAL PRIMARY KEY,
+    customer_id INTEGER REFERENCES customer(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'pending'
+);
+
+-- Order Items table
+CREATE TABLE order_item (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER REFERENCES "order"(id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES item(id),
+    quantity INTEGER,
+    weight FLOAT,
+    price FLOAT
+);
+
+
+
+-- Categories
+INSERT INTO item_category (name) VALUES
+('Wash and Dry'), ('Dry Cleaning'), ('Wash and Iron'),
+('Pressing Only'), ('Bed and Bath Linen'), ('Household Items');
+
+-- Items
+INSERT INTO item (name, category_id, price, is_weight_based) VALUES
+('Wash and Dry Service', 1, 300, TRUE),
+('Shirt', 2, 450, FALSE),
+('Trouser', 2, 350, FALSE),
+('Bed Sheet', 5, 400, FALSE),
+('Curtains (KG)', 6, 750, TRUE);

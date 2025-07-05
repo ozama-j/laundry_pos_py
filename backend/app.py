@@ -1,0 +1,549 @@
+
+from flask import Flask, jsonify, request, send_file
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+from datetime import datetime
+from io import BytesIO
+from reportlab.pdfgen import canvas
+import smtplib
+from flask_cors import CORS
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+
+app = Flask(__name__)
+CORS(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:0000@localhost/laundry_pos1'
+app.config['JWT_SECRET_KEY'] = 'd2e479a6f8b749c4b90afed23f89a72efb362d61ea9d1c3e8e57d44f0c6b8a22'
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# --------------------- MODELS ---------------------
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(20), nullable=False)
+
+class Customer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    mobile = db.Column(db.String(15), unique=True, nullable=False)
+
+class ItemCategory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+
+class Item(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('item_category.id'), nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    is_weight_based = db.Column(db.Boolean, default=False)
+    category = db.relationship('ItemCategory')
+
+class Order(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='pending')
+    customer = db.relationship('Customer')
+
+class OrderItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('item.id'), nullable=False)
+    quantity = db.Column(db.Integer)
+    weight = db.Column(db.Float)
+    price = db.Column(db.Float)
+    order = db.relationship('Order', backref=db.backref('order_items', lazy=True))
+    item = db.relationship('Item')
+
+# --------------------- ROLE DECORATOR ---------------------
+def role_required(role):
+    def wrapper(fn):
+        @wraps(fn)
+        @jwt_required()
+        def decorator(*args, **kwargs):
+            current_user = get_jwt_identity()
+            user = User.query.filter_by(username=current_user).first()
+            if user.role != role:
+                return jsonify({'msg': f'Access forbidden: {role}s only'}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper
+
+# --------------------- AUTH ROUTES ---------------------
+@app.route('/register', methods=['POST'])
+@role_required('admin')
+def register():
+    data = request.get_json()
+    hashed_pw = generate_password_hash(data['password'])
+    new_user = User(username=data['username'], password=hashed_pw, role=data['role'])
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'msg': 'User created'}), 201
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    user = User.query.filter_by(username=data['username']).first()
+    if not user or not check_password_hash(user.password, data['password']):
+        return jsonify({'msg': 'Invalid credentials'}), 401
+    access_token = create_access_token(identity=user.username)
+    return jsonify(access_token=access_token), 200
+
+@app.route('/update-password', methods=['POST'])
+@role_required('admin')
+def update_password():
+    data = request.get_json()
+    user = User.query.filter_by(username=data['username']).first()
+    if not user:
+        return jsonify({'msg': 'User not found'}), 404
+    user.password = generate_password_hash(data['new_password'])
+    db.session.commit()
+    return jsonify({'msg': 'Password updated'}), 200
+
+# --------------------- CUSTOMER MANAGEMENT ---------------------
+@app.route('/customers', methods=['POST'])
+@jwt_required()
+def create_customer():
+    data = request.get_json()
+    name = data.get('name')
+    mobile = data.get('mobile')
+
+    if not name or not mobile:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    existing_customer = Customer.query.filter_by(mobile=mobile).first()
+    if existing_customer:
+        return jsonify({'msg': 'Customer already exists'}), 400
+
+    customer = Customer(name=name, mobile=mobile)
+    db.session.add(customer)
+    db.session.commit()
+    return jsonify({'msg': 'Customer created', 'customer_id': customer.id}), 201
+
+@app.route('/customers', methods=['GET'])
+@jwt_required()
+def get_all_customers():
+    customers = Customer.query.all()
+    results = []
+    for customer in customers:
+        results.append({
+            'id': customer.id,
+            'name': customer.name,
+            'mobile': customer.mobile
+        })
+    return jsonify(results), 200
+
+@app.route('/customers/<int:customer_id>', methods=['GET'])
+@jwt_required()
+def get_single_customer(customer_id):
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+    return jsonify({
+        'id': customer.id,
+        'name': customer.name,
+        'mobile': customer.mobile
+    }), 200 
+
+@app.route('/customers/<int:customer_id>', methods=['PUT'])
+@jwt_required()
+def update_customer(customer_id):
+    data = request.get_json()
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+
+    name = data.get('name')
+    mobile = data.get('mobile')
+
+    if not name or not mobile:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    customer.name = name
+    customer.mobile = mobile
+    db.session.commit()
+    return jsonify({'msg': 'Customer updated'}), 200
+
+@app.route('/customers/<int:customer_id>', methods=['DELETE'])
+@role_required('admin')
+def delete_customer(customer_id):
+    customer = Customer.query.get(customer_id)
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+    db.session.delete(customer)
+    db.session.commit()
+    return jsonify({'msg': f'Customer #{customer.id} deleted successfully'}), 200
+
+# --------------------- ITEM MANAGEMENT ---------------------
+
+@app.route('/items', methods=['POST'])
+@role_required('admin')
+def create_item():
+    data = request.get_json()
+    name = data.get('name')
+    category_id = data.get('category_id')
+    price = data.get('price')
+    is_weight_based = data.get('is_weight_based', False)
+
+    if not name or not category_id or price is None:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    item = Item(name=name, category_id=category_id, price=price, is_weight_based=is_weight_based)
+    db.session.add(item)
+    db.session.commit()
+    return jsonify({'msg': 'Item created', 'item_id': item.id}), 201
+
+@app.route('/items', methods=['GET'])
+@jwt_required()
+def get_all_items():
+    items = Item.query.all()
+    results = []
+    for item in items:
+        results.append({
+            'id': item.id,
+            'name': item.name,
+            'category': item.category.name if item.category else None,
+            'price': item.price,
+            'is_weight_based': item.is_weight_based
+        })
+    return jsonify(results), 200
+
+@app.route('/items/<int:item_id>', methods=['GET'])
+@jwt_required()
+def get_single_item(item_id):
+    item = Item.query.get(item_id)
+    if not item:
+        return jsonify({'msg': 'Item not found'}), 404
+    return jsonify({
+        'id': item.id,
+        'name': item.name,
+        'category': item.category.name if item.category else None,
+        'price': item.price,
+        'is_weight_based': item.is_weight_based
+    }), 200
+
+@app.route('/items/<int:item_id>', methods=['PUT'])
+@role_required('admin')
+def update_item(item_id):
+    data = request.get_json()
+    item = Item.query.get(item_id)
+    if not item:
+        return jsonify({'msg': 'Item not found'}), 404
+
+    name = data.get('name')
+    category_id = data.get('category_id')
+    price = data.get('price')
+    is_weight_based = data.get('is_weight_based', False)
+    if not name or not category_id or price is None:
+        return jsonify({'msg': 'Missing data'}), 400
+    item.name = name
+    item.category_id = category_id
+    item.price = price
+    item.is_weight_based = is_weight_based  
+    db.session.commit()
+    return jsonify({'msg': 'Item updated'}), 200
+
+@app.route('/items/<int:item_id>', methods=['DELETE'])
+@role_required('admin')
+def delete_item(item_id):
+    item = Item.query.get(item_id)
+    if not item:
+        return jsonify({'msg': 'Item not found'}), 404
+    db.session.delete(item)
+    db.session.commit()
+    return jsonify({'msg': f'Item #{item.id} deleted successfully'}), 200
+
+# --------------------- ITEM CATEGORY MANAGEMENT ---------------------
+@app.route('/item-categories', methods=['POST'])
+@role_required('admin') 
+def create_item_category():
+    data = request.get_json()
+    name = data.get('name')
+
+    if not name:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    category = ItemCategory(name=name)
+    db.session.add(category)
+    db.session.commit()
+    return jsonify({'msg': 'Item category created', 'category_id': category.id}), 201
+
+@app.route('/item-categories', methods=['GET'])
+@jwt_required()
+def get_all_item_categories():
+    categories = ItemCategory.query.all()
+    results = []
+    for category in categories:
+        results.append({
+            'id': category.id,
+            'name': category.name
+        })
+    return jsonify(results), 200
+
+@app.route('/item-categories/<int:category_id>', methods=['GET'])
+@jwt_required()
+def get_single_item_category(category_id):
+    category = ItemCategory.query.get(category_id)
+    if not category:
+        return jsonify({'msg': 'Item category not found'}), 404
+    return jsonify({
+        'id': category.id,
+        'name': category.name
+    }), 200
+
+@app.route('/item-categories/<int:category_id>', methods=['PUT'])
+@role_required('admin')
+def update_item_category(category_id):
+    data = request.get_json()
+    category = ItemCategory.query.get(category_id)
+    if not category:
+        return jsonify({'msg': 'Item category not found'}), 404
+
+    name = data.get('name')
+    if not name:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    category.name = name
+    db.session.commit()
+    return jsonify({'msg': 'Item category updated'}), 200
+
+@app.route('/item-categories/<int:category_id>', methods=['DELETE'])
+@role_required('admin')
+def delete_item_category(category_id):  
+    category = ItemCategory.query.get(category_id)
+    if not category:
+        return jsonify({'msg': 'Item category not found'}), 404
+    db.session.delete(category)
+    db.session.commit()
+    return jsonify({'msg': f'Item category #{category.id} deleted successfully'}), 200
+
+@app.route('/item-categories/<string:category_name>/items', methods=['GET'])
+@jwt_required() 
+def get_items_by_category_name(category_name):
+    category = ItemCategory.query.filter_by(name=category_name).first()
+    if not category:
+        return jsonify({'msg': 'Item category not found'}), 404
+    items = Item.query.filter_by(category_id=category.id).all()
+    results = []
+    for item in items:
+        results.append({
+            'id': item.id,
+            'name': item.name,
+            'price': item.price,
+            'is_weight_based': item.is_weight_based
+        })
+    return jsonify(results), 200
+
+
+# --------------------- ORDER MANAGEMENT ---------------------
+
+@app.route('/orders', methods=['POST'])
+@jwt_required()
+def create_order():
+    data = request.get_json()
+    customer_id = data.get('customer_id')
+    items = data.get('items', [])
+
+    if not customer_id or not items:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    order = Order(customer_id=customer_id)
+    db.session.add(order)
+    db.session.flush()
+
+    for entry in items:
+        item_id = entry['item_id']
+        item = Item.query.get(item_id)
+        if not item:
+            continue
+
+        if item.is_weight_based:
+            weight = float(entry['weight'])
+            price = item.price
+            if weight > 1:
+                price += (weight - 1) * 200
+            order_item = OrderItem(order_id=order.id, item_id=item.id, weight=weight, price=price)
+        else:
+            quantity = int(entry['quantity'])
+            price = quantity * item.price
+            order_item = OrderItem(order_id=order.id, item_id=item.id, quantity=quantity, price=price)
+
+        db.session.add(order_item)
+
+    db.session.commit()
+    return jsonify({'msg': 'Order created', 'order_id': order.id}), 201
+
+@app.route('/orders', methods=['GET'])
+@jwt_required()
+def get_all_orders():
+    orders = Order.query.all()
+    results = []
+    for order in orders:
+        order_data = {
+            'id': order.id,
+            'customer': order.customer.name,
+            'status': order.status,
+            'created_at': order.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'items': []
+        }
+        for item in order.order_items:
+            item_data = {
+                'name': item.item.name,
+                'quantity': item.quantity,
+                'weight': item.weight,
+                'price': item.price
+            }
+            order_data['items'].append(item_data)
+        results.append(order_data)
+    return jsonify(results), 200
+
+@app.route('/orders/<int:order_id>', methods=['GET'])
+@jwt_required()
+def get_single_order(order_id):
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'msg': 'Order not found'}), 404
+
+    items = []
+    for item in order.order_items:
+        items.append({
+            'name': item.item.name,
+            'quantity': item.quantity,
+            'weight': item.weight,
+            'price': item.price
+        })
+
+    return jsonify({
+        'id': order.id,
+        'customer': order.customer.name,
+        'status': order.status,
+        'created_at': order.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'items': items
+    }), 200
+
+@app.route('/orders/customer/<int:customer_id>', methods=['GET'])
+@jwt_required()
+def get_orders_by_customer(customer_id):
+    orders = Order.query.filter_by(customer_id=customer_id).all()
+    results = []
+    for order in orders:
+        order_data = {
+            'id': order.id,
+            'status': order.status,
+            'created_at': order.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            'items': []
+        }
+        for item in order.order_items:
+            item_data = {
+                'name': item.item.name,
+                'quantity': item.quantity,
+                'weight': item.weight,
+                'price': item.price
+            }
+            order_data['items'].append(item_data)
+        results.append(order_data)
+    return jsonify(results), 200
+
+@app.route('/orders/<int:order_id>/status', methods=['PATCH'])
+@jwt_required()
+def update_order_status(order_id):
+    data = request.get_json()
+    status = data.get('status')
+    if not status:
+        return jsonify({'msg': 'Missing status'}), 400
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'msg': 'Order not found'}), 404
+    order.status = status
+    db.session.commit()
+    return jsonify({'msg': f'Order #{order.id} status updated to {status}'}), 200
+
+@app.route('/orders/<int:order_id>', methods=['DELETE'])
+@role_required('admin')
+def delete_order(order_id):
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'msg': 'Order not found'}), 404
+    db.session.delete(order)
+    db.session.commit()
+    return jsonify({'msg': f'Order #{order.id} deleted successfully'}), 200
+
+
+@app.route('/orders/<int:order_id>/pdf', methods=['GET'])
+@jwt_required()
+def generate_invoice(order_id):
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'msg': 'Order not found'}), 404
+    pdf = BytesIO()
+    c = canvas.Canvas(pdf)
+    c.drawString(100, 800, f"Invoice for Order #{order.id}")
+    y = 750
+    total = 0
+    for item in order.order_items:
+        if item.weight:
+            line = f"{item.item.name} - {item.weight}kg = Rs. {item.price:.2f}"
+        else:
+            line = f"{item.item.name} x {item.quantity} = Rs. {item.price:.2f}"
+        c.drawString(100, y, line)
+        y -= 20
+        total += item.price
+    c.drawString(100, y - 20, f"Total: Rs. {total:.2f}")
+    c.save()
+    pdf.seek(0)
+    return send_file(pdf, download_name=f"invoice_order_{order.id}.pdf", as_attachment=True)
+
+@app.route('/orders/<int:order_id>/email', methods=['POST'])
+@role_required('admin')
+def email_invoice(order_id):
+    data = request.get_json()
+    recipient_email = data['email']
+    order = Order.query.get(order_id)
+    if not order:
+        return jsonify({'msg': 'Order not found'}), 404
+    pdf = BytesIO()
+    c = canvas.Canvas(pdf)
+    c.drawString(100, 800, f"Invoice for Order #{order.id}")
+    y = 750
+    total = 0
+    for item in order.order_items:
+        if item.weight:
+            line = f"{item.item.name} - {item.weight}kg = Rs. {item.price:.2f}"
+        else:
+            line = f"{item.item.name} x {item.quantity} = Rs. {item.price:.2f}"
+        c.drawString(100, y, line)
+        y -= 20
+        total += item.price
+    c.drawString(100, y - 20, f"Total: Rs. {total:.2f}")
+    c.save()
+    pdf.seek(0)
+
+    msg = MIMEMultipart()
+    msg['From'] = 'your_email@example.com'
+    msg['To'] = recipient_email
+    msg['Subject'] = f"Invoice for Order #{order.id}"
+    msg.attach(MIMEText("Please find attached invoice.", 'plain'))
+
+    attachment = MIMEApplication(pdf.read(), _subtype="pdf")
+    attachment.add_header('Content-Disposition', 'attachment', filename=f"invoice_order_{order.id}.pdf")
+    msg.attach(attachment)
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login('your_email@example.com', 'your_password')
+        server.send_message(msg)
+        server.quit()
+        return jsonify({'msg': 'Invoice emailed successfully'}), 200
+    except Exception as e:
+        return jsonify({'msg': f'Email failed: {str(e)}'}), 500
+
+# --------------------- RUN ---------------------
+if __name__ == '__main__':
+    app.run(debug=True)
