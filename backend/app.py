@@ -180,6 +180,34 @@ def delete_customer(customer_id):
     db.session.commit()
     return jsonify({'msg': f'Customer #{customer.id} deleted successfully'}), 200
 
+
+@app.route('/customers/<string:mobile>', methods=['GET'])
+@jwt_required()
+def get_customer_by_mobile(mobile):
+    customer = Customer.query.filter_by(mobile=mobile).first()
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+    return jsonify({
+        'id': customer.id,
+        'name': customer.name,
+        'mobile': customer.mobile
+    }), 200
+
+@app.route('/customers/<string:name>', methods=['GET'])
+@jwt_required()
+def get_customer_by_name(name):
+    customers = Customer.query.filter(Customer.name.ilike(f'%{name}%')).all()
+    if not customers:
+        return jsonify({'msg': 'No customers found'}), 404
+    results = []
+    for customer in customers:
+        results.append({
+            'id': customer.id,
+            'name': customer.name,
+            'mobile': customer.mobile
+        })
+    return jsonify(results), 200
+
 # --------------------- ITEM MANAGEMENT ---------------------
 
 @app.route('/items', methods=['POST'])
