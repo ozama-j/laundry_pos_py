@@ -1,31 +1,28 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import Orders from './components/Orders';
-import Invoice from './components/Invoice';
-import ProtectedRoute from './components/ProtectedRoute';
-import './index.css';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './auth/Login';
+import Dashboard from './pages/Dashboard';
+import Orders from './pages/Orders';
+import Customers from './pages/Customers';
+import Sales from './pages/Sales';
+import './styles/global.css';
 
-function App() {
+const PrivateRoute = ({ children }) => {
+  const token = localStorage.getItem('token');
+  return token ? children : <Navigate to="/" />;
+};
+
+export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/login" />} />
-      <Route path="/login" element={<Login />} />
-      <Route
-        path="/dashboard"
-        element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
-      />
-      <Route
-        path="/orders"
-        element={<ProtectedRoute><Orders /></ProtectedRoute>}
-      />
-      <Route
-        path="/invoice/:orderId"
-        element={<ProtectedRoute><Invoice /></ProtectedRoute>}
-      />
-    </Routes>
+    <Router>
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+        <Route path="/orders" element={<PrivateRoute><Orders /></PrivateRoute>} />
+        <Route path="/customers" element={<PrivateRoute><Customers /></PrivateRoute>} />
+        <Route path="/sales" element={<PrivateRoute><Sales /></PrivateRoute>} />
+      </Routes>
+    </Router>
   );
 }
 
-export default App;

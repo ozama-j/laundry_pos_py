@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-from datetime import datetime
+from datetime import datetime,timedelta
 from io import BytesIO
 from reportlab.pdfgen import canvas
 import smtplib
@@ -17,6 +17,7 @@ app = Flask(__name__)
 CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:0000@localhost/laundry_pos1'
 app.config['JWT_SECRET_KEY'] = 'd2e479a6f8b749c4b90afed23f89a72efb362d61ea9d1c3e8e57d44f0c6b8a22'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=9)  # Token expires in 9 hours
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
@@ -106,6 +107,13 @@ def update_password():
     db.session.commit()
     return jsonify({'msg': 'Password updated'}), 200
 
+app.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    # JWT tokens are stateless, so we can't "logout" in the traditional sense.
+    # However, we can implement token revocation if needed.
+    return jsonify({'msg': 'Logged out successfully'}), 200
+
 # --------------------- CUSTOMER MANAGEMENT ---------------------
 @app.route('/customers', methods=['POST'])
 @jwt_required()
@@ -181,7 +189,7 @@ def delete_customer(customer_id):
     return jsonify({'msg': f'Customer #{customer.id} deleted successfully'}), 200
 
 
-@app.route('/customers/<string:mobile>', methods=['GET'])
+@app.route('/customers/by-mobile/<string:mobile>', methods=['GET'])
 @jwt_required()
 def get_customer_by_mobile(mobile):
     customer = Customer.query.filter_by(mobile=mobile).first()
@@ -193,7 +201,7 @@ def get_customer_by_mobile(mobile):
         'mobile': customer.mobile
     }), 200
 
-@app.route('/customers/<string:name>', methods=['GET'])
+@app.route('/customers/by-name/<string:name>', methods=['GET'])
 @jwt_required()
 def get_customer_by_name(name):
     customers = Customer.query.filter(Customer.name.ilike(f'%{name}%')).all()
@@ -355,6 +363,23 @@ def delete_item_category(category_id):
 @jwt_required() 
 def get_items_by_category_name(category_name):
     category = ItemCategory.query.filter_by(name=category_name).first()
+    if not category:
+        return jsonify({'msg': 'Item category not found'}), 404
+    items = Item.query.filter_by(category_id=category.id).all()
+    results = []
+    for item in items:
+        results.append({
+            'id': item.id,
+            'name': item.name,
+            'price': item.price,
+            'is_weight_based': item.is_weight_based
+        })
+    return jsonify(results), 200
+
+@app.route('/item-categories/<int:category_id>/items', methods=['GET'])
+@jwt_required()
+def get_items_by_category_id(category_id):
+    category = ItemCategory.query.get(category_id)
     if not category:
         return jsonify({'msg': 'Item category not found'}), 404
     items = Item.query.filter_by(category_id=category.id).all()
@@ -571,6 +596,36 @@ def email_invoice(order_id):
         return jsonify({'msg': 'Invoice emailed successfully'}), 200
     except Exception as e:
         return jsonify({'msg': f'Email failed: {str(e)}'}), 500
+    
+# --------------------- SALES SUMMARY   ---------------------
+@app.route('/sales/summary', methods=['GET'])
+@jwt_required()
+def get_sales_summary():
+    orders = Order.query.filter(Order.status == 'delivered').all()
+    total_sales = 0
+    total_orders = len(orders)
+    sales_by_date = {}
+
+    for order in orders:
+        order_date = order.created_at.date()
+        if order_date not in sales_by_date:
+            sales_by_date[order_date] = 0
+        for item in order.order_items:
+            sales_by_date[order_date] += item.price
+            total_sales += item.price
+
+    # Convert sales_by_date into a list of dicts for frontend charting
+    sales_by_date_list = [
+        {"date": str(date), "total": total}
+        for date, total in sorted(sales_by_date.items())
+    ]
+
+    summary = {
+        'total_sales': total_sales,
+        'total_orders': total_orders,
+        'sales_by_date': sales_by_date_list  # For charting
+    }
+    return jsonify(summary), 200
 
 # --------------------- RUN ---------------------
 if __name__ == '__main__':

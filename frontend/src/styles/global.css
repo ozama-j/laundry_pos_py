@@ -1,0 +1,64 @@
+/* Base styles */
+body {
+  background: #f4faff;
+  color: #222;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Fancy button styles */
+button {
+  background: linear-gradient(90deg, #4fc3f7 0%, #1976d2 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.08);
+  transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+  margin: 5px 0;
+}
+
+button:hover, button:focus {
+  background: linear-gradient(90deg, #1976d2 0%, #4fc3f7 100%);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.15);
+  outline: none;
+}
+
+input, select {
+  border: 1px solid #b3e5fc;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 1rem;
+  background: #fff;
+  color: #222;
+  transition: border 0.2s;
+}
+
+input:focus, select:focus {
+  border: 1.5px solid #1976d2;
+  outline: none;
+}
+
+h2, h3 {
+  color: #1976d2;
+  margin-top: 0;
+}
+
+div, ul, li {
+  background: transparent;
+}
+
+/* Card style for containers */
+.card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(33, 150, 243, 0.07);
+  padding: 20px;
+  margin-bottom: 20px;
+}
