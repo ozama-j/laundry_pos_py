@@ -179,28 +179,30 @@ export default function Dashboard() {
   );
 
   return (
-    <div style={{ display: 'flex' }}>
-      <Sidebar />
-      <div className="card" style={{ flex: 1, padding: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Logout onLogout={handleLogout} />
+    <div className="main-content">
+      <div style={{ display: 'flex' }}>
+        <Sidebar />
+        <div className="card" style={{ flex: 1, padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Logout onLogout={handleLogout} />
+          </div>
+          <h2>Services</h2>
+          <div className="card" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+            {services.map((s, i) => (
+              <button key={i} onClick={() => openModal(s)}>{s.name}</button>
+            ))}
+          </div>
         </div>
-        <h2>Services</h2>
-        <div className="card" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
-          {services.map((s, i) => (
-            <button key={i} onClick={() => openModal(s)}>{s.name}</button>
-          ))}
+        <div style={{ width: 350, marginLeft: 20 }}>
+          {!customer ? (
+            <CustomerLookup setSelectedCustomer={setCustomer} />
+          ) : (
+            <Cart />
+          )}
         </div>
+        <ItemModal open={modalOpen} category={selectedService?.name} onClose={() => setModalOpen(false)} onAdd={addToCart} />
+        {showSummary && <OrderSummaryModal />}
       </div>
-      <div style={{ width: 350, marginLeft: 20 }}>
-        {!customer ? (
-          <CustomerLookup setSelectedCustomer={setCustomer} />
-        ) : (
-          <Cart />
-        )}
-      </div>
-      <ItemModal open={modalOpen} category={selectedService?.name} onClose={() => setModalOpen(false)} onAdd={addToCart} />
-      {showSummary && <OrderSummaryModal />}
     </div>
   );
 }

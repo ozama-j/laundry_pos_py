@@ -18,7 +18,7 @@ export default function Orders() {
   return (
     <div style={{ display: 'flex' }}>
       <Sidebar />
-      <div style={{ flex: 1, padding: 20 }}>
+      <div className="main-content">
         <h2>Orders</h2>
         {orders.map(o => (
           <div className ="card" key={o.id}>

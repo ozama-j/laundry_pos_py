@@ -12,7 +12,7 @@ export default function Customers() {
   return (
     <div style={{ display: 'flex' }}>
       <Sidebar />
-      <div style={{ flex: 1, padding: 20 }}>
+      <div className="main-content" style={{ flex: 1, padding: 20, marginLeft: '180px' }}>
         <h2>Customers</h2>
         <ul>
           {customers.map(c => <li key={c.id}>{c.name} - {c.mobile}</li>)}

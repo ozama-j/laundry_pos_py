@@ -16,6 +16,10 @@ export default function Sidebar() {
         alignItems: 'flex-start',
         borderTopRightRadius: '18px',
         borderBottomRightRadius: '18px',
+        position: 'fixed', // <-- Added to fix the sidebar
+        top: 0,
+        left: 0,
+        zIndex: 100,
       }}
     >
       <h2 style={{ color: '#1976d2', marginBottom: '2rem', fontWeight: 700, letterSpacing: 1 }}>Menu</h2>

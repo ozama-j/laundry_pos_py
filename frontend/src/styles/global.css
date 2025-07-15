@@ -62,3 +62,9 @@ div, ul, li {
   padding: 20px;
   margin-bottom: 20px;
 }
+
+.main-content {
+  margin-left: 180px;
+  flex: 1;
+  padding: 20px;
+}

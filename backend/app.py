@@ -112,7 +112,7 @@ def update_password():
     db.session.commit()
     return jsonify({'msg': 'Password updated'}), 200
 
-app.route('/logout', methods=['POST'])
+@app.route('/logout', methods=['POST'])
 @jwt_required()
 def logout():
     # JWT tokens are stateless, so we can't "logout" in the traditional sense.
@@ -714,6 +714,100 @@ def get_sales_summary():
         'sales_by_date': sales_by_date_list  # For charting
     }
     return jsonify(summary), 200
+
+@app.route('/sales/by-category', methods=['GET'])
+@jwt_required()
+def sales_by_category():
+    categories = ItemCategory.query.all()
+    result = []
+
+    for category in categories:
+        total = 0
+        items = Item.query.filter_by(category_id=category.id).all()
+        item_ids = [item.id for item in items]
+        order_items = OrderItem.query.filter(OrderItem.item_id.in_(item_ids)).all()
+        for item in order_items:
+            total += item.price
+        result.append({
+            'category': category.name,
+            'total_sales': total
+        })
+
+    return jsonify(result), 200
+
+@app.route('/sales/top-customers', methods=['GET'])
+@jwt_required()
+def top_customers():
+    customer_spending = {}
+
+    orders = Order.query.filter(Order.status == 'delivered').all()
+    for order in orders:
+        total = sum(item.price for item in order.order_items)
+        if order.customer.name not in customer_spending:
+            customer_spending[order.customer.name] = total
+        else:
+            customer_spending[order.customer.name] += total
+
+    sorted_customers = sorted(customer_spending.items(), key=lambda x: x[1], reverse=True)
+    result = [{'customer': name, 'total_spent': spent} for name, spent in sorted_customers[:10]]
+    return jsonify(result), 200
+
+@app.route('/sales/top-items', methods=['GET'])
+@jwt_required()
+def top_items():
+    item_counts = {}
+    items = Item.query.all()
+
+    for item in items:
+        order_items = OrderItem.query.filter_by(item_id=item.id).all()
+        count = sum([oi.quantity or oi.weight or 0 for oi in order_items])
+        item_counts[item.name] = count
+
+    sorted_items = sorted(item_counts.items(), key=lambda x: x[1], reverse=True)
+    result = [{'item': name, 'count': count} for name, count in sorted_items[:10]]
+    return jsonify(result), 200
+
+@app.route('/sales/monthly-summary', methods=['GET'])
+@jwt_required()
+def monthly_summary():
+    from collections import defaultdict
+    import calendar
+
+    monthly_data = defaultdict(float)
+    orders = Order.query.filter(Order.status == 'delivered').all()
+
+    for order in orders:
+        month_key = order.created_at.strftime('%Y-%m')
+        for item in order.order_items:
+            monthly_data[month_key] += item.price
+
+    result = [{"month": month, "total_sales": total} for month, total in sorted(monthly_data.items())]
+    return jsonify(result), 200
+
+@app.route('/sales/orders-per-day', methods=['GET'])
+@jwt_required()
+def orders_per_day():
+    from collections import defaultdict
+
+    daily_orders = defaultdict(int)
+    orders = Order.query.all()
+
+    for order in orders:
+        date_key = order.created_at.strftime('%Y-%m-%d')
+        daily_orders[date_key] += 1
+
+    result = [{"date": date, "orders": count} for date, count in sorted(daily_orders.items())]
+    return jsonify(result), 200
+
+@app.route('/sales/status-breakdown', methods=['GET'])
+@jwt_required()
+def order_status_breakdown():
+    from collections import Counter
+
+    orders = Order.query.all()
+    status_counts = Counter([order.status for order in orders])
+    return jsonify(status_counts), 200
+
 
 # --------------------- RUN ---------------------
 if __name__ == '__main__':
