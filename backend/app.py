@@ -1,4 +1,3 @@
-
 from flask import Flask, jsonify, request, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -7,6 +6,10 @@ from functools import wraps
 from datetime import datetime,timedelta
 from io import BytesIO
 from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.platypus import Table, TableStyle
 import smtplib
 from flask_cors import CORS
 from email.mime.text import MIMEText
@@ -534,20 +537,50 @@ def generate_invoice(order_id):
     order = Order.query.get(order_id)
     if not order:
         return jsonify({'msg': 'Order not found'}), 404
+
     pdf = BytesIO()
-    c = canvas.Canvas(pdf)
-    c.drawString(100, 800, f"Invoice for Order #{order.id}")
-    y = 750
+    c = canvas.Canvas(pdf, pagesize=A4)
+    width, height = A4
+
+    # Header
+    c.setFont("Helvetica-Bold", 22)
+    c.setFillColor(colors.HexColor("#1976d2"))
+    c.drawCentredString(width / 2, height - 40, "Kleen Laundry")
+    c.setFont("Helvetica", 13)
+    c.setFillColor(colors.black)
+    c.drawCentredString(width / 2, height - 65, f"Invoice for Order #{order.id}")
+
+    # Customer Info
+    c.setFont("Helvetica", 11)
+    c.drawString(40, height - 100, f"Customer: {order.customer.name} ({order.customer.mobile})")
+
+    # Table Data
+    data = [["Item", "Qty/Wt", "Price (Lkr)"]]
     total = 0
     for item in order.order_items:
-        if item.weight:
-            line = f"{item.item.name} - {item.weight}kg = Rs. {item.price:.2f}"
-        else:
-            line = f"{item.item.name} x {item.quantity} = Rs. {item.price:.2f}"
-        c.drawString(100, y, line)
-        y -= 20
+        qty = f"{item.weight}kg" if item.weight else f"{item.quantity}pcs"
+        data.append([item.item.name, qty, f"{item.price:.2f}"])
         total += item.price
-    c.drawString(100, y - 20, f"Total: Rs. {total:.2f}")
+
+    # Table
+    table = Table(data, colWidths=[200, 80, 80])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e3f2fd")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#1976d2")),
+        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#bbdefb")),
+    ]))
+    table.wrapOn(c, width, height)
+    table.drawOn(c, 40, height - 180 - 24 * len(data))
+
+    # Total
+    c.setFont("Helvetica-Bold", 13)
+    c.setFillColor(colors.HexColor("#1976d2"))
+    c.drawString(40, height - 200 - 24 * len(data), f"Total: Lkr. {total:.2f}")
+
     c.save()
     pdf.seek(0)
     return send_file(pdf, download_name=f"invoice_order_{order.id}.pdf", as_attachment=True)

@@ -10,7 +10,7 @@ export default function Customers() {
   }, []);
 
   return (
-    <div className ="card" style={{ display: 'flex' }}>
+    <div style={{ display: 'flex' }}>
       <Sidebar />
       <div style={{ flex: 1, padding: 20 }}>
         <h2>Customers</h2>
