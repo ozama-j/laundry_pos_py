@@ -35,6 +35,8 @@ class Customer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     mobile = db.Column(db.String(15), unique=True, nullable=False)
+    address = db.Column(db.String(200), nullable=True)
+    email = db.Column(db.String(100), nullable=True)
 
 class ItemCategory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -122,8 +124,10 @@ def logout():
 @jwt_required()
 def create_customer():
     data = request.get_json()
-    name = data.get('name')
-    mobile = data.get('mobile')
+    name = data.get('name').strip()
+    mobile = data.get('mobile').strip()
+    address = data.get('address').strip()
+    email = data.get('email').strip()
 
     if not name or not mobile:
         return jsonify({'msg': 'Missing data'}), 400
@@ -132,7 +136,7 @@ def create_customer():
     if existing_customer:
         return jsonify({'msg': 'Customer already exists'}), 400
 
-    customer = Customer(name=name, mobile=mobile)
+    customer = Customer(name=name, mobile=mobile, address=address, email=email)
     db.session.add(customer)
     db.session.commit()
     return jsonify({'msg': 'Customer created', 'customer_id': customer.id}), 201
@@ -146,7 +150,9 @@ def get_all_customers():
         results.append({
             'id': customer.id,
             'name': customer.name,
-            'mobile': customer.mobile
+            'mobile': customer.mobile,
+            'address': customer.address,
+            'email': customer.email
         })
     return jsonify(results), 200
 
@@ -159,7 +165,9 @@ def get_single_customer(customer_id):
     return jsonify({
         'id': customer.id,
         'name': customer.name,
-        'mobile': customer.mobile
+        'mobile': customer.mobile,
+        'address': customer.address,
+        'email': customer.email
     }), 200 
 
 @app.route('/customers/<int:customer_id>', methods=['PUT'])
@@ -172,14 +180,42 @@ def update_customer(customer_id):
 
     name = data.get('name')
     mobile = data.get('mobile')
+    address = data.get('address')
+    email = data.get('email')
 
     if not name or not mobile:
         return jsonify({'msg': 'Missing data'}), 400
 
     customer.name = name
     customer.mobile = mobile
+    customer.address = address
+    customer.email = email
     db.session.commit()
     return jsonify({'msg': 'Customer updated'}), 200
+
+@app.route('/customers/by-mobile/<string:mobile>', methods=['PUT'])
+@jwt_required()
+def update_customer_by_mobile(mobile):
+    data = request.get_json()
+    customer = Customer.query.filter_by(mobile=mobile).first()
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+
+    name = data.get('name')
+    new_mobile = data.get('mobile')
+    address = data.get('address')
+    email = data.get('email')
+
+    if not name or not new_mobile:
+        return jsonify({'msg': 'Missing data'}), 400
+
+    customer.name = name
+    customer.mobile = new_mobile
+    customer.address = address
+    customer.email = email
+    db.session.commit()
+    return jsonify({'msg': 'Customer updated'}), 200
+
 
 @app.route('/customers/<int:customer_id>', methods=['DELETE'])
 @role_required('admin')
@@ -191,6 +227,17 @@ def delete_customer(customer_id):
     db.session.commit()
     return jsonify({'msg': f'Customer #{customer.id} deleted successfully'}), 200
 
+@app.route('/customers/by-mobile/<string:mobile>', methods=['DELETE'])
+@role_required('admin')
+def delete_customer_by_mobile(mobile):
+    customer = Customer.query.filter_by(mobile=mobile).first()
+    if not customer:
+        return jsonify({'msg': 'Customer not found'}), 404
+    db.session.delete(customer)
+    db.session.commit()
+    return jsonify({'msg': f'Customer with mobile {mobile} deleted successfully'}), 200
+
+
 
 @app.route('/customers/by-mobile/<string:mobile>', methods=['GET'])
 @jwt_required()
@@ -201,7 +248,9 @@ def get_customer_by_mobile(mobile):
     return jsonify({
         'id': customer.id,
         'name': customer.name,
-        'mobile': customer.mobile
+        'mobile': customer.mobile,
+        'address': customer.address,
+        'email': customer.email
     }), 200
 
 @app.route('/customers/by-name/<string:name>', methods=['GET'])
@@ -215,7 +264,9 @@ def get_customer_by_name(name):
         results.append({
             'id': customer.id,
             'name': customer.name,
-            'mobile': customer.mobile
+            'mobile': customer.mobile,
+            'address': customer.address,
+            'email': customer.email
         })
     return jsonify(results), 200
 
@@ -553,6 +604,10 @@ def generate_invoice(order_id):
     # Customer Info
     c.setFont("Helvetica", 11)
     c.drawString(40, height - 100, f"Customer: {order.customer.name} ({order.customer.mobile})")
+    if order.customer.email:
+        c.drawString(40, height - 115, f"Email: {order.customer.email}")
+    if order.customer.address:
+        c.drawString(40, height - 130, f"Address: {order.customer.address}")
 
     # Table Data
     data = [["Item", "Qty/Wt", "Price (Lkr)"]]
